@@ -103,14 +103,152 @@ static void	check_terminals(void)
 ## Expansion
 
 ## Parsing & Tokenising
+There are many ways in which one can parse the input read by readline. One possibility is using a binary tree; however, we found that it was rather complicated not only to find a logical way to fill in the tree but also complex and confusing when it came to use the binary tree for execution. Therefore we implemented a better system.
+
+First of all, we needed **TOKENS**. The tokens are enums that can identify what elements our input string is composed of. The Tokens can be of type:
+- REDIRECTION_OUT: >
+- REDIRECTION_IN: <
+- APPEND: >>
+- PIPE: |
+- HERE_DOC: <<
+- WORD: It can be a command like `ls` or a command with options `echo -n` (these are two separate WORD tokens) or the name of a file `outfile.txt`. Basically anything that is not any of the above types
+- EOF: Used to determine when you have reached the end of the input string
+
+![image](https://github.com/user-attachments/assets/c38e89f7-35ab-4ab0-856b-84da979cafd9)
+
+For tokenizing, we used a struct that in principle determines what type of token we have, a char pointer to the beginning of the token and the length of that token:
+
+![image](https://github.com/user-attachments/assets/ac79c325-7350-40f4-a618-443dd0cd7dce)
+
+We implemented this approach to avoid allocating memory for the tokenizer. Instead, the token is stored on the stack, and each call to the tokenizer function returns an instance of `t_token`. With each function call, the input string pointer advances, allowing us to parse the input string while keeping both the current and the next token readily accessible
+
+For parsing the input, instead of using a binary tree like many people have used before, we used this struct:
+
+![image](https://github.com/user-attachments/assets/a27fab59-0941-4806-9629-754eb623d234)
+
+The main point of parsing in this project apart from validating input, should be making sure execution has an easy way to do its job. Therefore if we provide execution with a straight-forward struct with all the information it needs, it is easier to take the information that you need rather than having to move up and down the string looking for it.
+
+The struct is in principle composed of:
+- char **argv: Used to save the command and the options for the command
+- char *infile: After checking that token == <, it is then expected that the next token == WORD. Therefore if < is found, the word next to it is the name of the infile
+- char *outfile: Same as infile but with token == > or token == >>
+- char **delimiter: This was needed to handle HERE_DOC, given that if `minishell->: << eof1 << eof2`, all these "delimiters" need to be written in order to stop HERE_DOC from executing. Therefore, they need to be saved in an array of delimiters
+- int in_fd: After you determine the name of the infile, it is good to check whether you can read from it by using open()
+- int out_fd: Same as in_fd but for outfiles. If the outfile does not exist then it needs to be created. Depending on whether you found a redirection_out or redirection_append, then you need different flags to open the file
+- struct s_command *pipe: If a pipe is found, then you allocate memory for a new struct of type t_command, the current t_command struct is going to be a linked list with as many t_command structs as there are pipes. This is useful because when we had to handle pipes, we could just simply check `while(command->pipe != NULL)`. This allowed us to `fork()` as long as there were pipes.
+
+The function  `analyze_token()` would be called recursively in order to fill in the t_command struct and finish when token == EOF:
+
+```
+int	check_token_type(t_parse *info)
+{
+	t_token	tkn;
+
+	tkn = info->token;
+	if (tkn.type == TOKEN_WORD)
+	{
+		if (analyze_word(info) == EXIT_FAILURE)
+			return (EXIT_FAILURE);
+	}
+	if (tkn.type == TOKEN_REDIRECT_IN)
+	{
+		if (analyze_redirect_in(info) == EXIT_FAILURE)
+			return (EXIT_FAILURE);
+	}
+	if (tkn.type == TOKEN_REDIRECT_OUT || tkn.type == TOKEN_REDIRECT_APPEND)
+	{
+		if (analyze_redirect_out(info) == EXIT_FAILURE)
+			return (EXIT_FAILURE);
+	}
+	if (tkn.type == TOKEN_HERE_DOC)
+	{
+		if (analyze_here_doc(info) == EXIT_FAILURE)
+			return (EXIT_FAILURE);
+	}
+	return (EXIT_SUCCESS);
+}
+
+int	analyze_tkn(t_command *cmd, t_data *data, t_token tkn, t_scanner *scnr)
+{
+	t_parse	info;
+
+	info = init_parser(cmd, data, tkn, scnr);
+	if (check_token_type(&info) == EXIT_FAILURE)
+		return (EXIT_FAILURE);
+	if (tkn.type == TOKEN_ERROR || info.next_token.type == TOKEN_ERROR)
+		return (EXIT_FAILURE);
+	if (info.next_token.type == TOKEN_PIPE && cmd->argv)
+		return (analyze_pipe(info));
+	if (info.next_token.type == TOKEN_END && !cmd->argv && \
+		!cmd->infile && !cmd->outfile && !cmd->delimiter)
+	{
+		return (EXIT_FAILURE);
+	}
+	if (info.next_token.type == TOKEN_END)
+		return (EXIT_SUCCESS);
+	if (analyze_tkn(cmd, data, info.next_token, scnr) == EXIT_FAILURE)
+		return (EXIT_FAILURE);
+	return (EXIT_SUCCESS);
+}
+```
+This is the basic idea of how the structure should look like after parsing the input string:
+![image](https://github.com/user-attachments/assets/415fdd02-aca4-49a1-9ff8-00f8ef544cdb)
 
 ## Execution
 
+```
+int	execution_pipe(t_data *data, t_command *command, char **paths)
+{
+	t_command	*cur_cmd;
+	t_command	*prev_cmd;
+
+	cur_cmd = command;
+	prev_cmd = NULL;
+	while (cur_cmd)
+	{
+		set_fds(cur_cmd, prev_cmd);
+		if (cur_cmd->argv)
+		{
+			if (!cur_cmd->pipe && !prev_cmd && is_builtin(cur_cmd->argv[0]))
+				return (execute_builtin(data, cur_cmd, paths));
+			else if (cur_cmd->argv)
+				execute_cmd(data, cur_cmd, paths);
+			close_pipes(cur_cmd, prev_cmd);
+			if (cur_cmd->pipe)
+				prev_cmd = cur_cmd;
+		}
+		else if (!cur_cmd->argv && cur_cmd->in_fd != -1 && \
+					cur_cmd->out_fd != -1)
+			data->exit_status = 0;
+		cur_cmd = cur_cmd->pipe;
+	}
+	wait_child(data, command, prev_cmd);
+	return (free_dbl_array(&paths), data->exit_status);
+}
+int	execution(t_data *data, t_command *command)
+{
+	char		*path;
+	char		**path_array;
+	int			return_value;
+
+	path_array = NULL;
+	path = get_path(data->env);
+	if (path)
+	{
+		path_array = ft_split(path, ':');
+		if (!path_array)
+			return (error_memory_allocation(data, data->cmd_head));
+	}
+	check_heredoc(data, command, path_array);
+	return_value = execution_pipe(data, command, path_array);
+	return (return_value);
+}
+```
+
 ## Signals
 
-## Builtins
-Part of the project was to implement our own builtins most of them without options except for echo that would only be able to handle option -n
 
+## Builtins
 ### echo
 Prints a line of text to the standard output. Commonly used to display messages or output the value of variables. If *echo -n*, then a newline should be omitted at the end of echo's output
 
@@ -229,7 +367,7 @@ int	ft_cd(t_data *data, t_command *command)
 
 - `chdir()`: Changes the current working directory to a char *string taken as the PATH to the directory you want to change
 
-Part of cd's function is also to update the environment variables PWD and OLDPWD. Cd should also be able to take you to the **HOME** directory if *cd ~* and cd should be able to take you to the **OLDPWD** directory if *cd -*
+Part of cd's function is also to update the environment variables PWD and OLDPWD. Cd should also be able to take you to the **HOME** directory if cd ~ and cd should be able to take you to the **OLDPWD** directory if cd -
 
 ### pwd
 Prints the current working directory. It shows the absolute path of the shell’s current directory
