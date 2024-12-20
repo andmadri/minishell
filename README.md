@@ -195,6 +195,45 @@ This is the basic idea of how the structure should look like after parsing the i
 ![image](https://github.com/user-attachments/assets/415fdd02-aca4-49a1-9ff8-00f8ef544cdb)
 
 ## Execution
+To be able to execute the commands passed to the input string, `execve()` was used. The function is used in Unix-like operating systems to replace the current process with a new process specified by a pathname. It provides a way to run a new program within the context of an existing process.
+
+`int execve(const char *pathname, char *const argv[], char *const envp[])`
+
+To get the pathname paramet of execve, the environment variable **PATH=** was copied into a 2D char array, where every path in **PATH=** was a separate string. To handle whether a command exists or if you do not have the permissions to execute it, the command which is stored in t_command struct char *argv[0], should be attached to every string in the newly 2D paths array, and be checked if it can be accessed:
+
+```
+bool	access_true(t_data *data, char *cmd)
+{
+	DIR	*dir;
+
+	dir = opendir(cmd);
+	if (dir != NULL)
+	{
+		closedir(dir);
+		if ((ft_strlen(cmd) >= 2 && cmd[0] == '.' && cmd[1] == '/') \
+			|| cmd[ft_strlen(cmd) - 1] == '/' || cmd[0] == '/')
+		{
+			data->exit_status = CMD_NOT_X;
+			ft_putstr_fd("minishell: Is a directory\n", 2);
+		}
+		else
+			return (data->exit_status = CMD_NOT_F, false);
+		return (false);
+	}
+	if (access(cmd, X_OK) == 0)
+		return (true);
+	if (access(cmd, F_OK) == 0 && ft_strchr(cmd, '/'))
+	{
+		data->exit_status = CMD_NOT_X;
+		ft_putstr_fd("minishell: Command not executable\n", 2);
+		return (false);
+	}
+	return (false);
+}
+```
+
+`int access(const char *pathname, int mode)`
+It is used to check the accessibility of a file based on the permissions. It can have different flags, the ones used here are **X_OK** (check for execute) and **F_OK** (check for the existance of the file). If a command, which is in theory as well a file, exists but is not executable, then the return code should be **126**. On the other hand when a command is not found, you should return the famous **127**
 
 ```
 int	execution_pipe(t_data *data, t_command *command, char **paths)
@@ -244,9 +283,6 @@ int	execution(t_data *data, t_command *command)
 	return (return_value);
 }
 ```
-
-## Signals
-
 
 ## Builtins
 ### echo
@@ -460,8 +496,108 @@ Remember that you have to copy your own environment variables as you need to cha
 ### unset
 Removes environment variables. It deletes specified variables from the shell’s environment
 
+```
+char	**rearrange_env(char *ptr_unset, char **array)
+{
+	char	**cpy_env;
+	int		i;
+	int		j;
+
+	i = 0;
+	j = 0;
+	cpy_env = (char **)malloc(((ft_arraylen(array) - 1) + 1) \
+	* sizeof(char *));
+	if (!cpy_env)
+		return (NULL);
+	while (array[i])
+	{
+		if (array[i] == ptr_unset)
+		{
+			free(array[i]);
+			array[i++] = NULL;
+			continue ;
+		}
+		cpy_env[j++] = array[i];
+		array[i++] = NULL;
+	}
+	cpy_env[j] = NULL;
+	free(array);
+	array = cpy_env;
+	return (cpy_env);
+}
+
+int	ft_unset(t_data *data, char **argv)
+{
+	int		i;
+	int		j;
+
+	i = 1;
+	while (argv[i])
+	{
+		j = 0;
+		while (data->env[j])
+		{
+			if (ft_strncmp(argv[i], data->env[j], ft_env_len(argv[i])) == 0)
+			{
+				if (ft_strncmp("=", data->env[j] + ft_env_len(argv[i]), 1) == 0)
+				{
+					data->env = rearrange_env(data->env[j], data->env);
+					if (!data->env)
+						return (error_memory_allocation(data, data->cmd_head));
+					break ;
+				}
+			}
+			j++;
+		}
+		i++;
+	}
+	return (data->exit_status = EXIT_SUCCESS, EXIT_SUCCESS);
+}
+```
+
 ### env
 Displays the environment variables. It lists all environment variables available in the shell
+
+```
+char	*find_env(char *var_env, int length, char **array)
+{
+	int	i;
+
+	i = 0;
+	if (length == 0)
+		length = ft_strlen(var_env);
+	while (array[i])
+	{
+		if (ft_strncmp(var_env, array[i], length) == 0)
+			return (array[i] + length + 1);
+		i++;
+	}
+	return (NULL);
+}
+
+int	ft_env(t_data *data, t_command *command, bool check_argv)
+{
+	int	i;
+
+	i = 0;
+	if (find_env("PATH", 4, data->env) == NULL)
+	{
+		data->exit_status = CMD_NOT_F;
+		ft_putstr_fd("minishell: No such file or directory\n", 2);
+		return (EXIT_SUCCESS);
+	}
+	if (command->argv[1] != NULL && check_argv == true)
+		return (error_cmd_not_found("env", command->argv[1], data));
+	while (data->env[i])
+	{
+		ft_putstr_fd(data->env[i], command->out_fd);
+		ft_putstr_fd("\n", command->out_fd);
+		i++;
+	}
+	data->exit_status = EXIT_SUCCESS;
+	return (EXIT_SUCCESS);
+}
+```
 
 ## exit
 Exits the shell. It terminates the current shell session
