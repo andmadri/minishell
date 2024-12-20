@@ -1,6 +1,9 @@
 # Minishell
 The objective was to recreate a shell-like program that mimics the behavior of bash in a Unix system. This was a collaborative project done with [Marieke's Last] 
 
+## Build Instructions
+It creates an executable called 'minishell', you should be able to run it inside the repository you cloned by './minishell'.
+
 ## External Functions
 In order to achieve this, we were allowed to use the GNU Readline library which provides a set of functions for reading input from the termnial:
 
@@ -8,7 +11,7 @@ In order to achieve this, we were allowed to use the GNU Readline library which 
 
 - `add_history()`: add a line of input to the history list. Navigation of previous commands happens automatically if the up-arrow key is pressed
 
-```
+```c
 static int	read_eval_print_loop(t_data *data)
 {
 	while (1)
@@ -42,7 +45,7 @@ static int	read_eval_print_loop(t_data *data)
 
 All of the above functions except for `readline()` were used for handling signals, particularly when there was no running child process.
 
-```
+```c
 static void	signal_handler(int signal_code)
 {
 	if (signal_code == SIGINT)
@@ -59,7 +62,7 @@ static void	signal_handler(int signal_code)
 
 - `rl_clear_history()`: Clears the history of the command which in theory frees whatever was allocated to save anything that was successfully passed to `readline()`. It is useful when terminating the shell
 
-```
+```c
 int	terminate_minishell(t_data *data, char **paths)
 {
 	free_dbl_array(&data->env);
@@ -73,14 +76,14 @@ int	terminate_minishell(t_data *data, char **paths)
 
 - `isatty()`: Used to determine if a file descriptor refers to a terminal device: STDIN, STDOUT and STDERR. In principle, a shell should only be able to run if none of the previous file descriptors are "dupped", meaning that for instance a shell should not be able to be executed in a file:
 
-```
+```bash
 minishell -> ./minishell > outfile
 minishell: stdout: not a tty
 ```
 
 This is checked before we enter our REPL
 
-```
+```c
 static void	check_terminals(void)
 {
 	if (!isatty(STDIN_FILENO))
@@ -139,7 +142,7 @@ The struct is in principle composed of:
 
 The function  `analyze_token()` would be called recursively in order to fill in the t_command struct and finish when token == EOF:
 
-```
+```c
 int	check_token_type(t_parse *info)
 {
 	t_token	tkn;
@@ -201,7 +204,7 @@ To be able to execute the commands passed to the input string, `execve()` was us
 
 To get the pathname paramet of execve, the environment variable **PATH=** was copied into a 2D char array, where every path in **PATH=** was a separate string. To handle whether a command exists or if you do not have the permissions to execute it, the command which is stored in t_command struct char *argv[0], should be attached to every string in the newly 2D paths array, and be checked if it can be accessed:
 
-```
+```c
 bool	access_true(t_data *data, char *cmd)
 {
 	DIR	*dir;
@@ -235,7 +238,7 @@ bool	access_true(t_data *data, char *cmd)
 `int access(const char *pathname, int mode)`
 It is used to check the accessibility of a file based on the permissions. It can have different flags, the ones used here are **X_OK** (check for execute) and **F_OK** (check for the existance of the file). If a command, which is in theory as well a file, exists but is not executable, then the return code should be **126**. On the other hand when a command is not found, you should return the famous **127**
 
-```
+```c
 int	execution_pipe(t_data *data, t_command *command, char **paths)
 {
 	t_command	*cur_cmd;
@@ -288,7 +291,7 @@ int	execution(t_data *data, t_command *command)
 ### echo
 Prints a line of text to the standard output. Commonly used to display messages or output the value of variables. If *echo -n*, then a newline should be omitted at the end of echo's output
 
-```
+```c
 static bool	check_flag_n(char *str)
 {
 	int	i;
@@ -340,7 +343,7 @@ int	ft_echo(t_data *data, t_command command)
 ### cd
 Changes the current working directory. It updates the shell’s working directory to a specified path
 
-```
+```c
 static int	update_pwd_oldpwd(t_data *data, t_command *command)
 {
 	if (!find_env("PWD", 0, data->env) || !find_env("OLDPWD", 0, data->env))
@@ -408,7 +411,7 @@ Part of cd's function is also to update the environment variables PWD and OLDPWD
 ### pwd
 Prints the current working directory. It shows the absolute path of the shell’s current directory
 
-```
+```c
 int	ft_pwd(t_data *data, t_command *command, bool print)
 {
 	if (getcwd(data->pwd, sizeof(data->pwd)) == NULL)
@@ -435,14 +438,14 @@ It can be that we do not want to print the current working directory and that is
 ### export
 Sets environment variables. It makes variables available to child processes
 
-```
+```bash
 minishell -> export NEW_NAME=mary
 minishell -> env | grep mary
 NEW_NAME=mary
 ```
 
 If export has no arguments, then all environment variables should be printed in alphabetical order:
-```
+```bash
 minishell -> export
 declare -x COLORTERM="truecolor"
 declare -x DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/154528/bus"
@@ -456,12 +459,12 @@ declare -x FEH_PID="39431"
 ...
 ```
 Not all names are exportable, only if the name of a variable starts with a letter or and underscore, it is considered a true exportable variable. Moreover, you can export a variable without any information. 
-```
+```bash
 minishell -> export tu=
 minishell -> env | grep tu
 tu=
 ```
-```
+```c
 int	ft_export(t_data *data, t_command *command)
 {
 	int		i;
@@ -496,7 +499,7 @@ Remember that you have to copy your own environment variables as you need to cha
 ### unset
 Removes environment variables. It deletes specified variables from the shell’s environment
 
-```
+```c
 char	**rearrange_env(char *ptr_unset, char **array)
 {
 	char	**cpy_env;
@@ -558,7 +561,7 @@ int	ft_unset(t_data *data, char **argv)
 ### env
 Displays the environment variables. It lists all environment variables available in the shell
 
-```
+```c
 char	*find_env(char *var_env, int length, char **array)
 {
 	int	i;
@@ -602,7 +605,7 @@ int	ft_env(t_data *data, t_command *command, bool check_argv)
 ## exit
 Exits the shell. It terminates the current shell session
 
-```
+```c
 int	terminate_minishell(t_data *data, char **paths)
 {
 	free_dbl_array(&data->env);
@@ -645,7 +648,7 @@ int	ft_exit(t_data *data, t_command *cmd, t_command *cur_cmd, char **paths)
 
 The function exit can in theory be executed by itself or take one numeric argument which is what the shell's exit code would be
 
-```
+```bash
 minishell -> exit 23
 exit
 f0r1s13% echo $?
@@ -654,7 +657,7 @@ f0r1s13% echo $?
 
 However it should be able to handle multiple arguments. The behaviour of exit when a non-numeric argument and a numeric argument are passed together is to exit the shell with an exit code of 2:
 
-```
+```bash
 minishell -> exit hello 23
 exit
 minishell: exit: numeric argument required
@@ -664,7 +667,7 @@ f0r1s13% echo $?
 
 It cannot take the 23 although it is a numeric argument because the first argument should be a digit. On the other hand, if the exit is provided two numeric arguments, it will not terminate the shell but just print "exit". This is because it does not know which numeric argument it should be exited with:
 
-```
+```bash
 minishell -> exit 45 67
 exit
 minishell: exit: too many arguments
