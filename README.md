@@ -2,6 +2,22 @@
 The objective was to recreate a shell-like program that mimics the behavior of bash in a Unix system. This was a collaborative project done with [Marieke's Last] 
 
 ## Build Instructions
+First git clone the repository:
+```bash
+git clone git@github.com:andmadri/minishell.git minishell
+```
+Afterwards, move to the directory minishell, run the makefile by doing make all, and you should be good to go:
+
+```bash
+f1r1s10% cd minishell 
+f1r1s10% make all
+...
+f1r1s10% ./minishell 
+minishell -> echo hello
+hello
+minishell -> 
+```
+
 It creates an executable called 'minishell', you should be able to run it inside the repository you cloned by './minishell'.
 
 ## External Functions
