@@ -9,10 +9,10 @@ git clone git@github.com:andmadri/minishell.git minishell
 Afterwards, move to the directory minishell, run the makefile by doing make all, and you should be good to go:
 
 ```bash
-f1r1s10% cd minishell 
-f1r1s10% make all
+cd minishell 
+make all
 ...
-f1r1s10% ./minishell 
+./minishell 
 minishell -> echo hello
 hello
 minishell -> 
