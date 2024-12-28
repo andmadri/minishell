@@ -119,8 +119,6 @@ static void	check_terminals(void)
 	}
 }
 ```
-## Expansion
-
 ## Parsing & Tokenising
 There are many ways in which one can parse the input read by readline. One possibility is using a binary tree; however, we found that it was rather complicated not only to find a logical way to fill in the tree but also complex and confusing when it came to use the binary tree for execution. Therefore we implemented a better system.
 
@@ -137,23 +135,53 @@ First of all, we needed **TOKENS**. The tokens are enums that can identify what 
 
 For tokenizing, we used a struct that in principle determines what type of token we have, a char pointer to the beginning of the token and the length of that token:
 
-![image](https://github.com/user-attachments/assets/ac79c325-7350-40f4-a618-443dd0cd7dce)
+```c
+typedef enum e_type
+{
+	TOKEN_WORD = 1,
+	TOKEN_PIPE,
+	TOKEN_REDIRECT_IN,
+	TOKEN_REDIRECT_OUT,
+	TOKEN_REDIRECT_APPEND,
+	TOKEN_HERE_DOC,
+	TOKEN_ERROR,
+	TOKEN_END
+}			t_type;
+```
 
-We implemented this approach to avoid allocating memory for the tokenizer. Instead, the token is stored on the stack, and each call to the tokenizer function returns an instance of `t_token`. With each function call, the input string pointer advances, allowing us to parse the input string while keeping both the current and the next token readily accessible
+With every call to our tokenizer function, a `t_token` instance is saved in the stack (avoiding allocating memory). This `t_token` has a pointer to the beginning of the token in the input string, the length of the token and the type of token given by the previously discussed enum. This is useful for the structure we used while parsing, as there we needed to allocate name for a command or filename, and then use the length and pointer of the `t_token` instance to copy it to our parsing structure.
 
-For parsing the input, instead of using a binary tree like many people have used before, we used this struct:
+```c
+typedef struct s_token
+{
+	char	*start;
+	int		length;
+	t_type	type;
+}	t_token;
+```
 
-![image](https://github.com/user-attachments/assets/a27fab59-0941-4806-9629-754eb623d234)
+This is the struct we used for parsing the input:
 
-The main point of parsing in this project apart from validating input, should be making sure execution has an easy way to do its job. Therefore if we provide execution with a straight-forward struct with all the information it needs, it is easier to take the information that you need rather than having to move up and down the string looking for it.
+```c
+typedef struct s_parse
+{
+	t_command	*cmd;
+	t_data		*data;
+	t_token		token;
+	t_token		next_token;
+	t_scanner	*scanner;
+}	t_parse;
+```
+
+Parsing is fundamental; it should make execution straight-forward and easy.
 
 The struct is in principle composed of:
-- char **argv: Used to save the command and the options for the command
-- char *infile: After checking that token == <, it is then expected that the next token == WORD. Therefore if < is found, the word next to it is the name of the infile
-- char *outfile: Same as infile but with token == > or token == >>
-- char **delimiter: This was needed to handle HERE_DOC, given that if `minishell->: << eof1 << eof2`, all these "delimiters" need to be written in order to stop HERE_DOC from executing. Therefore, they need to be saved in an array of delimiters
-- int in_fd: After you determine the name of the infile, it is good to check whether you can read from it by using open()
-- int out_fd: Same as in_fd but for outfiles. If the outfile does not exist then it needs to be created. Depending on whether you found a redirection_out or redirection_append, then you need different flags to open the file
+- char **argv: Used to save the command and the options for the command.
+- char *infile: After checking that token == <, it is then expected that the next token == WORD. Therefore if < is found, the word next to it is the name of the infile.
+- char *outfile: Same as infile but with token == > or token == >>.
+- char **delimiter: This was needed to handle HERE_DOC, given that if `minishell->: << eof1 << eof2`, all these "delimiters" need to be written in order to stop HERE_DOC from executing. Therefore, they need to be saved in an array of delimiters.
+- int in_fd: After you determine the name of the infile, it is good to check whether you can read from it by using open().
+- int out_fd: Same as in_fd but for outfiles. If the outfile does not exist then it needs to be created. Depending on whether you found a redirection_out or redirection_append, then you need different flags to open the file.
 - struct s_command *pipe: If a pipe is found, then you allocate memory for a new struct of type t_command, the current t_command struct is going to be a linked list with as many t_command structs as there are pipes. This is useful because when we had to handle pipes, we could just simply check `while(command->pipe != NULL)`. This allowed us to `fork()` as long as there were pipes.
 
 The function  `analyze_token()` would be called recursively in order to fill in the t_command struct and finish when token == EOF:
@@ -218,7 +246,7 @@ To be able to execute the commands passed to the input string, `execve()` was us
 
 `int execve(const char *pathname, char *const argv[], char *const envp[])`
 
-To get the pathname paramet of execve, the environment variable **PATH=** was copied into a 2D char array, where every path in **PATH=** was a separate string. To handle whether a command exists or if you do not have the permissions to execute it, the command which is stored in t_command struct char *argv[0], should be attached to every string in the newly 2D paths array, and be checked if it can be accessed:
+To get the pathname parameter of execve, the environment variable **PATH=** was copied into a 2D char array, where every path in **PATH=** was a separate string. To handle whether a command exists or if you do not have the permissions to execute it, the command which is stored in t_command struct char *argv[0], should be attached to every string in the newly 2D paths array, and be checked if it can be accessed:
 
 ```c
 bool	access_true(t_data *data, char *cmd)
@@ -252,7 +280,7 @@ bool	access_true(t_data *data, char *cmd)
 ```
 
 `int access(const char *pathname, int mode)`
-It is used to check the accessibility of a file based on the permissions. It can have different flags, the ones used here are **X_OK** (check for execute) and **F_OK** (check for the existance of the file). If a command, which is in theory as well a file, exists but is not executable, then the return code should be **126**. On the other hand when a command is not found, you should return the famous **127**
+It is used to check the accessibility of a file based on the permissions. It can have different flags, the ones used here are **X_OK** (check for execute) and **F_OK** (check for the existance of the file). If a command, which is in theory as well a file, exists but is not executable, then the return code should be **126**. On the other hand when a command is not found, you should return the famous **127**.
 
 ```c
 int	execution_pipe(t_data *data, t_command *command, char **paths)
@@ -305,7 +333,7 @@ int	execution(t_data *data, t_command *command)
 
 ## Builtins
 ### echo
-Prints a line of text to the standard output. Commonly used to display messages or output the value of variables. If *echo -n*, then a newline should be omitted at the end of echo's output
+Prints a line of text to the standard output. Commonly used to display messages or output the value of variables. If *echo -n*, then a newline should be omitted at the end of echo's output.
 
 ```c
 static bool	check_flag_n(char *str)
@@ -357,7 +385,7 @@ int	ft_echo(t_data *data, t_command command)
 ```
 
 ### cd
-Changes the current working directory. It updates the shell’s working directory to a specified path
+Changes the current working directory. It updates the shell’s working directory to a specified path.
 
 ```c
 static int	update_pwd_oldpwd(t_data *data, t_command *command)
@@ -420,12 +448,12 @@ int	ft_cd(t_data *data, t_command *command)
 }
 ```
 
-- `chdir()`: Changes the current working directory to a char *string taken as the PATH to the directory you want to change
+- `chdir()`: Changes the current working directory to a char *string taken as the PATH to the directory you want to change.
 
-Part of cd's function is also to update the environment variables PWD and OLDPWD. Cd should also be able to take you to the **HOME** directory if cd ~ and cd should be able to take you to the **OLDPWD** directory if cd -
+Part of cd's function is also to update the environment variables PWD and OLDPWD. Cd should also be able to take you to the **HOME** directory if cd ~ and cd should be able to take you to the **OLDPWD** directory if cd -.
 
 ### pwd
-Prints the current working directory. It shows the absolute path of the shell’s current directory
+Prints the current working directory. It shows the absolute path of the shell’s current directory.
 
 ```c
 int	ft_pwd(t_data *data, t_command *command, bool print)
@@ -446,13 +474,13 @@ int	ft_pwd(t_data *data, t_command *command, bool print)
 }
 ```
 
-- `getcwd()`: Gets the current working directory and puts it into a buffer. You have to pass a buffer, in our case data->pwd and the size, sizeof(data->pwd)
+- `getcwd()`: Gets the current working directory and puts it into a buffer. You have to pass a buffer, in our case data->pwd and the size, sizeof(data->pwd).
 
-It can be that we do not want to print the current working directory and that is because we use `ft_pwd()` for `ft_cd()` to update the environment variable **PWD=**
+It can be that we do not want to print the current working directory and that is because we use `ft_pwd()` for `ft_cd()` to update the environment variable **PWD=**.
 
 
 ### export
-Sets environment variables. It makes variables available to child processes
+Sets environment variables. It makes variables available to child processes.
 
 ```bash
 minishell -> export NEW_NAME=mary
@@ -510,10 +538,10 @@ int	ft_export(t_data *data, t_command *command)
 }
 ```
 
-Remember that you have to copy your own environment variables as you need to change them throughout the minishell execution therefore when you export and unset variables, you need to free and allocate memory everytime
+Remember that you have to copy your own environment variables as you need to change them throughout the minishell execution therefore when you export and unset variables, you need to free and allocate memory everytime.
 
 ### unset
-Removes environment variables. It deletes specified variables from the shell’s environment
+Removes environment variables. It deletes specified variables from the shell’s environment.
 
 ```c
 char	**rearrange_env(char *ptr_unset, char **array)
@@ -575,7 +603,7 @@ int	ft_unset(t_data *data, char **argv)
 ```
 
 ### env
-Displays the environment variables. It lists all environment variables available in the shell
+Displays the environment variables. It lists all environment variables available in the shell.
 
 ```c
 char	*find_env(char *var_env, int length, char **array)
@@ -619,7 +647,7 @@ int	ft_env(t_data *data, t_command *command, bool check_argv)
 ```
 
 ## exit
-Exits the shell. It terminates the current shell session
+Exits the shell. It terminates the current shell session.
 
 ```c
 int	terminate_minishell(t_data *data, char **paths)
@@ -662,7 +690,7 @@ int	ft_exit(t_data *data, t_command *cmd, t_command *cur_cmd, char **paths)
 }
 ```
 
-The function exit can in theory be executed by itself or take one numeric argument which is what the shell's exit code would be
+The function exit can in theory be executed by itself or take one numeric argument which is what the shell's exit code would be.
 
 ```bash
 minishell -> exit 23
